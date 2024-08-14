@@ -86,36 +86,56 @@ const Chat = ({
     createThread();
   }, []);
 
-  const sendMessage = async (text) => {
-    const response = await fetch(
-      `/api/assistants/threads/${threadId}/messages`,
-      {
-        method: "POST",
-        body: JSON.stringify({
-          content: text,
-        }),
+  const withExponentialBackoff = async (fn, retries = 5, delay = 1000) => {
+    for (let i = 0; i < retries; i++) {
+      try {
+        return await fn();
+      } catch (error) {
+        if (error.status === 429 && i < retries - 1) {
+          console.warn(`Rate limit exceeded. Retrying in ${delay}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          delay *= 2; // Exponential backoff
+        } else {
+          throw error;
+        }
       }
-    );
-    const stream = AssistantStream.fromReadableStream(response.body);
-    handleReadableStream(stream);
+    }
+  };
+
+  const sendMessage = async (text) => {
+    await withExponentialBackoff(async () => {
+      const response = await fetch(
+        `/api/assistants/threads/${threadId}/messages`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            content: text,
+          }),
+        }
+      );
+      const stream = AssistantStream.fromReadableStream(response.body);
+      handleReadableStream(stream);
+    });
   };
 
   const submitActionResult = async (runId, toolCallOutputs) => {
-    const response = await fetch(
-      `/api/assistants/threads/${threadId}/actions`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          runId: runId,
-          toolCallOutputs: toolCallOutputs,
-        }),
-      }
-    );
-    const stream = AssistantStream.fromReadableStream(response.body);
-    handleReadableStream(stream);
+    await withExponentialBackoff(async () => {
+      const response = await fetch(
+        `/api/assistants/threads/${threadId}/actions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            runId: runId,
+            toolCallOutputs: toolCallOutputs,
+          }),
+        }
+      );
+      const stream = AssistantStream.fromReadableStream(response.body);
+      handleReadableStream(stream);
+    });
   };
 
   const handleSubmit = (e) => {
@@ -133,46 +153,40 @@ const Chat = ({
 
   /* Stream Event Handlers */
 
-  // textCreated - create new assistant message
   const handleTextCreated = () => {
     appendMessage("assistant", "");
   };
 
-  // textDelta - append text to last assistant message
   const handleTextDelta = (delta) => {
     if (delta.value != null) {
       appendToLastMessage(delta.value);
-    };
+    }
     if (delta.annotations != null) {
       annotateLastMessage(delta.annotations);
     }
   };
 
-  // imageFileDone - show image in chat
   const handleImageFileDone = (image) => {
     appendToLastMessage(`\n![${image.file_id}](/api/files/${image.file_id})\n`);
-  }
+  };
 
-  // toolCallCreated - log new tool call
   const toolCallCreated = (toolCall) => {
     if (toolCall.type != "code_interpreter") return;
     appendMessage("code", "");
   };
 
-  // toolCallDelta - log delta and snapshot for the tool call
   const toolCallDelta = (delta, snapshot) => {
     if (delta.type != "code_interpreter") return;
     if (!delta.code_interpreter.input) return;
     appendToLastMessage(delta.code_interpreter.input);
   };
 
-  // handleRequiresAction - handle function call
   const handleRequiresAction = async (
     event: AssistantStreamEvent.ThreadRunRequiresAction
   ) => {
     const runId = event.data.id;
-    const toolCalls = event.data.required_action.submit_tool_outputs.tool_calls;
-    // loop over tool calls and call function handler
+    const toolCalls =
+      event.data.required_action.submit_tool_outputs.tool_calls;
     const toolCallOutputs = await Promise.all(
       toolCalls.map(async (toolCall) => {
         const result = await functionCallHandler(toolCall);
@@ -183,24 +197,16 @@ const Chat = ({
     submitActionResult(runId, toolCallOutputs);
   };
 
-  // handleRunCompleted - re-enable the input form
   const handleRunCompleted = () => {
     setInputDisabled(false);
   };
 
   const handleReadableStream = (stream: AssistantStream) => {
-    // messages
     stream.on("textCreated", handleTextCreated);
     stream.on("textDelta", handleTextDelta);
-
-    // image
     stream.on("imageFileDone", handleImageFileDone);
-
-    // code interpreter
     stream.on("toolCallCreated", toolCallCreated);
     stream.on("toolCallDelta", toolCallDelta);
-
-    // events without helpers yet (e.g. requires_action and run.done)
     stream.on("event", (event) => {
       if (event.event === "thread.run.requires_action")
         handleRequiresAction(event);
@@ -208,11 +214,7 @@ const Chat = ({
     });
   };
 
-  /*
-    =======================
-    === Utility Helpers ===
-    =======================
-  */
+  /* Utility Helpers */
 
   const appendToLastMessage = (text) => {
     setMessages((prevMessages) => {
@@ -226,7 +228,10 @@ const Chat = ({
   };
 
   const appendMessage = (role, text) => {
-    setMessages((prevMessages) => [...prevMessages, { role, text }]);
+    setMessages((prevMessages) => [
+      ...prevMessages,
+      { role, text },
+    ]);
   };
 
   const annotateLastMessage = (annotations) => {
@@ -236,17 +241,16 @@ const Chat = ({
         ...lastMessage,
       };
       annotations.forEach((annotation) => {
-        if (annotation.type === 'file_path') {
+        if (annotation.type === "file_path") {
           updatedLastMessage.text = updatedLastMessage.text.replaceAll(
             annotation.text,
             `/api/files/${annotation.file_path.file_id}`
           );
         }
-      })
+      });
       return [...prevMessages.slice(0, -1), updatedLastMessage];
     });
-    
-  }
+  };
 
   return (
     <div className={styles.chatContainer}>
