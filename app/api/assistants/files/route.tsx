@@ -41,30 +41,12 @@ export async function GET(request) {
     }
   });
 
-  // Perform a search on the vector store (using a placeholder logic)
-  const relevantFiles = await withExponentialBackoff(async () => {
-    return openai.beta.vectorStores.search({
-      vectorStoreId: vectorStoreId,
-      query: userQuery,
-      limit: 2, // Limit to top 2 relevant files
-    });
-  });
+  // The actual search is managed by the Assistant, so you don't need to manually query here.
+  // Instead, ensure the assistant is correctly set up to use the vector store.
+  console.log('Vector store is ready for use in the assistant.');
 
-  console.log('Relevant files found:', relevantFiles.length);
-
-  const filesArray = await Promise.all(
-    relevantFiles.map(async (file) => {
-      const fileDetails = await withExponentialBackoff(() => openai.files.retrieve(file.id));
-      return {
-        file_id: file.id,
-        filename: fileDetails.filename,
-        status: fileDetails.status,
-      };
-    })
-  );
-
-  console.log('Relevant files processed:', filesArray.length);
-  return Response.json(filesArray);
+  // Respond with a simple confirmation for now
+  return new Response("Vector store ready. Query will be handled by the assistant automatically.");
 }
 
 // upload file to assistant's vector store
