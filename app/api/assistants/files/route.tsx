@@ -1,17 +1,18 @@
 import { assistantId } from "@/app/assistant-config";
 import { openai } from "@/app/openai";
 
-// Exponential backoff function
-async function withExponentialBackoff(fn, retries = 5, delay = 1000) {
+// Exponential backoff function with enhanced retries and delay
+async function withExponentialBackoff(fn, retries = 7, delay = 1500) {
   for (let i = 0; i < retries; i++) {
     try {
       return await fn();
     } catch (error) {
       if (error.status === 429 && i < retries - 1) {
-        console.warn(`Rate limit exceeded. Retrying in ${delay}ms...`);
+        console.warn(`Rate limit exceeded. Retrying in ${delay}ms... (Attempt ${i + 1})`);
         await new Promise((resolve) => setTimeout(resolve, delay));
-        delay *= 2;
+        delay *= 2; // Exponential backoff
       } else {
+        console.error(`Request failed after ${i + 1} attempts:`, error);
         throw error;
       }
     }
