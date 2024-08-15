@@ -20,11 +20,10 @@ async function withExponentialBackoff(fn, retries = 7, delay = 1500) {
   }
 }
 
-// Query the vector store and get details of relevant files based on the user's question
+// Retrieve relevant files based on user's query
 export async function GET(request) {
   console.log('GET request received for relevant files');
 
-  // Extract user's query from the request (assuming it's passed in as a query parameter)
   const url = new URL(request.url);
   const userQuery = url.searchParams.get("query");
 
@@ -32,17 +31,27 @@ export async function GET(request) {
     return new Response("Query parameter is required", { status: 400 });
   }
 
-  // Query vector store for relevant files based on the user's question
   const vectorStoreId = await getOrCreateVectorStore();
-  const relevantFiles = await withExponentialBackoff(() => openai.beta.vectorStores.search({
-    vectorStoreId: vectorStoreId,
-    query: userQuery,
-    limit: 2, // Limit to top 2 relevant files
-  }));
+
+  // Ensure vector store is ready before querying
+  await withExponentialBackoff(async () => {
+    const vectorStore = await openai.beta.vectorStores.retrieve(vectorStoreId);
+    if (vectorStore.file_counts.in_progress > 0) {
+      throw new Error("Vector store is still processing files");
+    }
+  });
+
+  // Perform a search on the vector store (using a placeholder logic)
+  const relevantFiles = await withExponentialBackoff(async () => {
+    return openai.beta.vectorStores.search({
+      vectorStoreId: vectorStoreId,
+      query: userQuery,
+      limit: 2, // Limit to top 2 relevant files
+    });
+  });
 
   console.log('Relevant files found:', relevantFiles.length);
 
-  // Fetch details for only the relevant files
   const filesArray = await Promise.all(
     relevantFiles.map(async (file) => {
       const fileDetails = await withExponentialBackoff(() => openai.files.retrieve(file.id));
@@ -68,17 +77,13 @@ export async function POST(request) {
   const vectorStoreId = await getOrCreateVectorStore();
   console.log('Vector Store ID:', vectorStoreId);
 
-  const openaiFile = await withExponentialBackoff(() => openai.files.create({
-    file: file,
-    purpose: "assistants",
-  }));
-  console.log('File uploaded to OpenAI:', openaiFile.id);
+  await withExponentialBackoff(async () => {
+    await openai.beta.vectorStores.fileBatches.createAndPoll(vectorStoreId, {
+      file_ids: [file.id],
+    });
+  });
 
-  await withExponentialBackoff(() => openai.beta.vectorStores.files.create(vectorStoreId, {
-    file_id: openaiFile.id,
-  }));
-  console.log('File associated with vector store');
-
+  console.log('File uploaded and processed in vector store');
   return new Response();
 }
 
