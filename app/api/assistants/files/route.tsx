@@ -41,11 +41,8 @@ export async function GET(request) {
     }
   });
 
-  // The actual search is managed by the Assistant, so you don't need to manually query here.
-  // Instead, ensure the assistant is correctly set up to use the vector store.
   console.log('Vector store is ready for use in the assistant.');
 
-  // Respond with a simple confirmation for now
   return new Response("Vector store ready. Query will be handled by the assistant automatically.");
 }
 
@@ -60,8 +57,8 @@ export async function POST(request) {
   console.log('Vector Store ID:', vectorStoreId);
 
   await withExponentialBackoff(async () => {
-    await openai.beta.vectorStores.fileBatches.createAndPoll(vectorStoreId, {
-      file_ids: [file.id],
+    await openai.beta.vectorStores.files.createAndPoll(vectorStoreId, {
+      file_id: file.id,
     });
   });
 
